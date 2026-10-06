@@ -1,0 +1,29 @@
+# Node / Next.js
+node_modules/
+.next/
+out/
+.vercel/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# n8n (local, self-hosted — SQLite DB, credentials, logs; never commit)
+apps/n8n/data/

@@ -1,0 +1,144 @@
+"""GroqClient — Council Triage role. Groq's API is OpenAI-compatible
+(confirmed via a live smoke-test call before wiring this in — same
+discipline as every other provider integration here), so this reuses the
+`openai` SDK pointed at Groq's base_url rather than adding a new
+dependency. GPT-OSS on Groq is also a reasoning-tier model (confirmed live:
+196 hidden reasoning tokens on a trivial prompt at default effort, same
+class of issue as gpt-5-nano) — `reasoning_effort="low"` is Groq's
+confirmed-working equivalent of OpenAI's "minimal" (cut reasoning tokens
+196 -> 4 in testing).
+"""
+
+from __future__ import annotations
+
+import json
+
+from openai import AsyncOpenAI
+
+from app.llm.client import (
+    TRIAGE_SYSTEM_PROMPT,
+    VERIFIER_SYSTEM_PROMPT,
+    ProtectiveAction,
+    TriageCallResult,
+    TriageDecision,
+    VerifierCallResult,
+    VerifierDecision,
+    build_triage_user_prompt,
+    build_verifier_user_prompt,
+)
+from app.llm.pricing import compute_cost_usd
+
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+_VALID_ACTIONS = ("freeze_card", "file_dispute", "none")
+
+
+def _safe_action(raw: object) -> ProtectiveAction:
+    return raw if raw in _VALID_ACTIONS else "none"  # type: ignore[return-value]
+
+
+class GroqClient:
+    provider = "groq"
+
+    def __init__(self, api_key: str, model: str) -> None:
+        self.model = model
+        self._client = AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL)
+
+    async def _call(self, system_prompt: str, user_prompt: str) -> tuple[dict, int, int, float]:
+        response = await self._client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+            max_completion_tokens=700,
+            reasoning_effort="low",
+        )
+        raw = response.choices[0].message.content or "{}"
+        parsed = json.loads(raw)
+        input_tokens = response.usage.prompt_tokens if response.usage else 0
+        output_tokens = response.usage.completion_tokens if response.usage else 0
+        cost_usd = compute_cost_usd(self.model, input_tokens, output_tokens)
+        return parsed, input_tokens, output_tokens, cost_usd
+
+    async def triage_ticket(
+        self,
+        *,
+        ticket_query: str,
+        retrieved_context: list[str],
+        fraud_score: float,
+        fraud_reasons: list[str],
+        is_repeat_complaint: bool,
+        is_within_golden_hour: bool,
+    ) -> TriageCallResult:
+        parsed, input_tokens, output_tokens, cost_usd = await self._call(
+            TRIAGE_SYSTEM_PROMPT,
+            build_triage_user_prompt(
+                ticket_query,
+                retrieved_context,
+                fraud_score=fraud_score,
+                fraud_reasons=fraud_reasons,
+                is_repeat_complaint=is_repeat_complaint,
+                is_within_golden_hour=is_within_golden_hour,
+            ),
+        )
+        raw_risk_class = parsed.get("risk_class")
+        risk_class = raw_risk_class if raw_risk_class in ("routine", "high_stakes") else "high_stakes"
+        decision = TriageDecision(
+            resolvable=bool(parsed.get("resolvable", False)),
+            diagnosis=str(parsed.get("diagnosis", "")),
+            resolution_steps=parsed.get("resolution_steps"),
+            escalate_reason=parsed.get("escalate_reason"),
+            confidence=float(parsed.get("confidence", 0.0)),
+            risk_class=risk_class,
+            requested_action=_safe_action(parsed.get("requested_action")),
+        )
+        return TriageCallResult(
+            decision=decision,
+            provider=self.provider,
+            model=self.model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost_usd,
+        )
+
+    async def verify_resolution(
+        self,
+        *,
+        ticket_query: str,
+        retrieved_context: list[str],
+        fraud_score: float,
+        fraud_reasons: list[str],
+        triage_diagnosis: str,
+        triage_resolvable: bool,
+        triage_resolution_steps: str | None,
+        triage_requested_action: ProtectiveAction,
+    ) -> VerifierCallResult:
+        parsed, input_tokens, output_tokens, cost_usd = await self._call(
+            VERIFIER_SYSTEM_PROMPT,
+            build_verifier_user_prompt(
+                ticket_query,
+                retrieved_context,
+                triage_diagnosis,
+                triage_resolvable,
+                triage_resolution_steps,
+                fraud_score=fraud_score,
+                fraud_reasons=fraud_reasons,
+                triage_requested_action=triage_requested_action,
+            ),
+        )
+        decision = VerifierDecision(
+            approved=bool(parsed.get("approved", False)),
+            final_resolution_steps=parsed.get("final_resolution_steps"),
+            veto_reason=parsed.get("veto_reason"),
+            confidence=float(parsed.get("confidence", 0.0)),
+            requested_action=_safe_action(parsed.get("requested_action")),
+        )
+        return VerifierCallResult(
+            decision=decision,
+            provider=self.provider,
+            model=self.model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost_usd,
+        )

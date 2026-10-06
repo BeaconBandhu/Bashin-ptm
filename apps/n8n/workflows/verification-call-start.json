@@ -1,0 +1,40 @@
+{
+  "id": "vcallstart0000001",
+  "name": "Verification Call - Start",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "verification-call/start",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "b2c3d4e5-0001-4000-8000-000000000101"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/v1/domains/support/verification/start",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"session_id\": $json.body.session_id } }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000002",
+      "name": "Start Verification Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Start Verification Call", "type": "main", "index": 0 }]]
+    }
+  }
+}

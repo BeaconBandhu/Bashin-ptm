@@ -1,0 +1,40 @@
+{
+  "id": "vcallanswer000001",
+  "name": "Verification Call - Answer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "verification-call/answer",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "c1b2c3d4-0002-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "d2c3d4e5-0002-4000-8000-000000000201"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://127.0.0.1:8000/v1/domains/support/verification/{{ $json.body.call_id }}/answer",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"answer\": $json.body.answer } }}",
+        "options": {}
+      },
+      "id": "c1b2c3d4-0002-4000-8000-000000000002",
+      "name": "Submit Answer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Submit Answer", "type": "main", "index": 0 }]]
+    }
+  }
+}
